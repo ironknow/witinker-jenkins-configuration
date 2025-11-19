@@ -1,0 +1,73 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./certs:/etc/ssl/certs
+      - ./certs/private:/etc/ssl/private
+    depends_on:
+      - jenkins
+      - postgres
+    # 👇 Add this so the container can reach host ports 5000 / 8000 on Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - backend
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: jenkins
+    user: root
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JAVA_OPTS=-Xmx1024m
+    entrypoint: >
+      sh -c "
+        echo '⚙️ Installing Docker CLI for Jenkins...';
+        apt-get update -qq &&
+        apt-get install -y -qq docker.io &&
+        echo '✅ Docker version:' $(docker --version);
+        exec /usr/bin/tini -- /usr/local/bin/jenkins.sh
+      "
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:15
+    container_name: chatbot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chatbot
+      POSTGRES_PASSWORD: chatbot123
+      POSTGRES_DB: chatbotdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbot -d chatbotdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  jenkins_home:
+  postgres_data:
+
+networks:
+  backend:
+    name: jenkins_default
+    driver: bridge
